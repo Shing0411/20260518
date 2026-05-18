@@ -32,13 +32,7 @@ canvas {
     0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
-/* 不要用 display:none，手機可能會讀不到相機 */
-#inputVideo {
-  position: fixed;
-  left: -9999px;
-  top: -9999px;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+/* p5 createCapture 產生的 video 隱藏 */
+video {
+  display: none !important;
 }

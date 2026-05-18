@@ -1,9 +1,10 @@
-let videoElement;
+let video;
 let hands;
 
 let handLandmarks = null;
 let detectedGesture = "none";
 
+// 相機狀態
 let cameraStatus = "正在啟動攝影機...";
 let cameraReady = false;
 let cameraError = "";
@@ -37,25 +38,44 @@ let gestureProgress = 0;
 let menuStatus = "請做出手勢選擇";
 let gestureTriggered = false;
 
-// 防止 MediaPipe 重複送出影像
+// 防止 MediaPipe 重複處理影像
 let isSendingFrame = false;
 
 function setup() {
   const canvasW = min(windowWidth * 0.94, 980);
   const canvasH = min(windowHeight * 0.9, 680);
 
-  createCanvas(canvasW, canvasH);
+  const canvas = createCanvas(canvasW, canvasH);
 
-  videoElement = document.getElementById("inputVideo");
-
-  if (!videoElement) {
-    cameraStatus = "找不到 inputVideo，請檢查 index.html";
-    alert("找不到 inputVideo，請檢查 index.html 是否有 video 標籤。");
-    return;
+  // 如果 index.html 有 <main id="app"></main>，就把 canvas 放進去
+  const app = document.getElementById("app");
+  if (app) {
+    canvas.parent("app");
   }
 
+  // 使用 p5.js 內建攝影機，這是你以前成功開啟鏡頭的方式
+  video = createCapture(
+    {
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      },
+      audio: false
+    },
+    function () {
+      cameraReady = true;
+      cameraStatus = "攝影機啟動成功";
+      cameraError = "";
+      console.log("p5 攝影機啟動成功");
+    }
+  );
+
+  video.size(640, 480);
+  video.hide();
+
   setupMediaPipeHands();
-  startMobileCamera();
+  requestAnimationFrame(sendFrameToMediaPipe);
 }
 
 function draw() {
@@ -87,7 +107,7 @@ function windowResized() {
 
 function setupMediaPipeHands() {
   hands = new Hands({
-    locateFile: function(file) {
+    locateFile: function (file) {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }
   });
@@ -102,85 +122,20 @@ function setupMediaPipeHands() {
   hands.onResults(onHandsResults);
 }
 
-// =====================================================
-// 手機相機啟動：不用 MediaPipe Camera，改用 getUserMedia
-// =====================================================
-
-async function startMobileCamera() {
-  try {
-    cameraStatus = "正在請求相機權限...";
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      cameraStatus = "此瀏覽器不支援相機功能";
-      cameraError = "請使用 Chrome 或 Safari 開啟。";
-      alert("此瀏覽器不支援 getUserMedia 相機功能，請使用 Chrome 或 Safari。");
-      return;
-    }
-
-    // 手機若不是 HTTPS，通常會擋相機
-    if (!window.isSecureContext && location.hostname !== "localhost") {
-      cameraStatus = "目前不是 HTTPS，手機可能無法啟動相機";
-      cameraError = "請上傳到 p5.js Web Editor、GitHub Pages、Netlify 或 Vercel 測試。";
-      alert("手機瀏覽器通常需要 HTTPS 才能開啟相機。請用 p5.js Web Editor、GitHub Pages、Netlify 或 Vercel 測試。");
-      return;
-    }
-
-    const constraints = {
-      audio: false,
-      video: {
-        facingMode: "user",
-        width: { ideal: 640 },
-        height: { ideal: 480 }
-      }
-    };
-
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-    videoElement.srcObject = stream;
-    videoElement.setAttribute("playsinline", true);
-    videoElement.setAttribute("autoplay", true);
-    videoElement.setAttribute("muted", true);
-    videoElement.muted = true;
-
-    await videoElement.play();
-
-    cameraReady = true;
-    cameraStatus = "攝影機啟動成功";
-    cameraError = "";
-
-    requestAnimationFrame(sendFrameToMediaPipe);
-
-  } catch (error) {
-    console.error("攝影機啟動失敗：", error);
-
-    cameraReady = false;
-    cameraStatus = "攝影機啟動失敗";
-    cameraError = error.message || "請確認相機權限與 HTTPS 環境";
-
-    alert(
-      "攝影機啟動失敗。\n\n" +
-      "請確認：\n" +
-      "1. 已允許相機權限\n" +
-      "2. 手機使用 HTTPS 網址\n" +
-      "3. 不要用 LINE 內建瀏覽器開啟\n" +
-      "4. 建議使用 Chrome 或 Safari"
-    );
-  }
-}
-
 async function sendFrameToMediaPipe() {
   if (
-    cameraReady &&
+    video &&
+    video.elt &&
+    video.elt.readyState >= 2 &&
     hands &&
-    videoElement &&
-    videoElement.readyState >= 2 &&
     !isSendingFrame
   ) {
     try {
       isSendingFrame = true;
-      await hands.send({ image: videoElement });
+      await hands.send({ image: video.elt });
     } catch (error) {
       console.error("MediaPipe 影像送出失敗：", error);
+      cameraError = "MediaPipe 影像處理失敗";
     } finally {
       isSendingFrame = false;
     }
@@ -306,7 +261,7 @@ function playRound(playerGesture) {
   scoreText = `第 ${round} / ${maxRound} 回合｜你 ${playerScore}：${computerScore} 電腦`;
 
   if (round >= maxRound) {
-    setTimeout(function() {
+    setTimeout(function () {
       enterMenuState();
     }, 650);
   } else {
@@ -390,13 +345,13 @@ function handleMenuGesture(landmarks) {
     if (menuGesture === "continue") {
       menuStatus = "確認成功：繼續遊戲！";
 
-      setTimeout(function() {
+      setTimeout(function () {
         restartGame();
       }, 500);
     } else if (menuGesture === "exit") {
       menuStatus = "確認成功：結束遊戲！";
 
-      setTimeout(function() {
+      setTimeout(function () {
         endGame();
       }, 500);
     }
@@ -429,6 +384,46 @@ function endGame() {
   resultText = "遊戲已結束，感謝遊玩！";
   scoreText = "你已完成 AI 手勢辨識互動體驗";
   resetMenuGestureOnly();
+}
+
+// =====================================================
+// RWD 版面
+// =====================================================
+
+function getLayout() {
+  const isSmall = width < 760;
+
+  if (!isSmall) {
+    return {
+      camX: 36,
+      camY: 125,
+      camW: width * 0.48,
+      camH: height * 0.48,
+      infoX: width * 0.55,
+      infoY: 125,
+      infoW: width * 0.38,
+      infoH: height * 0.48,
+      guideX: 36,
+      guideY: height - 145,
+      guideW: width - 72,
+      guideH: 105
+    };
+  }
+
+  return {
+    camX: 30,
+    camY: 110,
+    camW: width - 60,
+    camH: height * 0.34,
+    infoX: 30,
+    infoY: 110 + height * 0.34 + 58,
+    infoW: width - 60,
+    infoH: height * 0.24,
+    guideX: 30,
+    guideY: height - 128,
+    guideW: width - 60,
+    guideH: 96
+  };
 }
 
 // =====================================================
@@ -477,18 +472,12 @@ function drawCameraView() {
   fill(2, 6, 23, 150);
   rect(camX - 8, camY - 8, camW + 16, camH + 46, 28);
 
-  // 相機畫面
   push();
   translate(camX + camW, camY);
   scale(-1, 1);
 
-  if (
-    cameraReady &&
-    videoElement &&
-    videoElement.readyState >= 2 &&
-    videoElement.videoWidth > 0
-  ) {
-    image(videoElement, 0, 0, camW, camH);
+  if (video && video.elt && video.elt.readyState >= 2) {
+    image(video, 0, 0, camW, camH);
   } else {
     fill(15, 23, 42);
     rect(0, 0, camW, camH, 24);
@@ -533,42 +522,6 @@ function drawCameraView() {
   textSize(13);
   textStyle(NORMAL);
   text(cameraStatus, camX + 12, camY + camH + 24);
-}
-
-function getLayout() {
-  const isSmall = width < 760;
-
-  if (!isSmall) {
-    return {
-      camX: 36,
-      camY: 125,
-      camW: width * 0.48,
-      camH: height * 0.48,
-      infoX: width * 0.55,
-      infoY: 125,
-      infoW: width * 0.38,
-      infoH: height * 0.48,
-      guideX: 36,
-      guideY: height - 145,
-      guideW: width - 72,
-      guideH: 105
-    };
-  }
-
-  return {
-    camX: 30,
-    camY: 110,
-    camW: width - 60,
-    camH: height * 0.34,
-    infoX: 30,
-    infoY: 110 + height * 0.34 + 58,
-    infoW: width - 60,
-    infoH: height * 0.24,
-    guideX: 30,
-    guideY: height - 128,
-    guideW: width - 60,
-    guideH: 96
-  };
 }
 
 function drawHandPoints(camX, camY, camW, camH) {

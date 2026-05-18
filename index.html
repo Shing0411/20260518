@@ -8,16 +8,11 @@
 
     <link rel="stylesheet" type="text/css" href="style.css" />
 
-    <!-- p5.js：先讀本機 libraries -->
+    <!-- p5.js -->
     <script src="libraries/p5.min.js"></script>
     <script src="libraries/p5.sound.min.js"></script>
 
-    <!-- MediaPipe 必要套件 -->
-    <script
-      src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"
-      crossorigin="anonymous">
-    </script>
-
+    <!-- MediaPipe Hands -->
     <script
       src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
       crossorigin="anonymous">
@@ -25,15 +20,7 @@
   </head>
 
   <body>
-    <main id="app">
-      <video
-        id="inputVideo"
-        autoplay
-        playsinline
-        muted>
-      </video>
-    </main>
-
+    <main id="app"></main>
     <script src="sketch.js"></script>
   </body>
 </html>
