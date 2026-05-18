@@ -1,653 +1,696 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="UTF-8" />
-  <title>AI 手勢魔法猜拳遊戲</title>
+let videoElement;
+let hands;
+let camera;
 
-  <!-- p5.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+let handLandmarks = null;
+let detectedGesture = "none";
 
-  <!-- MediaPipe Hands -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+// 相機狀態
+let cameraStatus = "正在啟動攝影機...";
+let cameraReady = false;
 
-  <style>
-    body {
-      margin: 0;
-      background: linear-gradient(135deg, #0f172a, #1e293b);
-      color: white;
-      font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
-      text-align: center;
+// 遊戲狀態
+let gameState = "playing";
+// playing：遊戲中
+// menu：遊戲結束選單
+// ended：遊戲結束
+
+let playerMove = "等待手勢";
+let computerMove = "等待中";
+let resultText = "請出拳：石頭、剪刀、布";
+let scoreText = "請先完成一局遊戲";
+
+let playerScore = 0;
+let computerScore = 0;
+let round = 1;
+const maxRound = 3;
+
+// 避免同一個手勢連續觸發
+let lastGameGesture = "none";
+let lastGameGestureTime = 0;
+const gameGestureCooldown = 1800;
+
+// 選單手勢確認
+const GESTURE_CONFIRM_TIME = 2000;
+let currentMenuGesture = "none";
+let gestureStartTime = null;
+let gestureProgress = 0;
+let menuStatus = "請做出手勢選擇";
+let gestureTriggered = false;
+
+function setup() {
+  const canvasW = min(windowWidth * 0.94, 980);
+  const canvasH = min(windowHeight * 0.9, 680);
+
+  createCanvas(canvasW, canvasH);
+
+  videoElement = document.getElementById("inputVideo");
+
+  if (!videoElement) {
+    cameraStatus = "找不到 inputVideo，請檢查 index.html";
+    alert("找不到 inputVideo，請檢查 index.html 是否有 video 標籤。");
+    return;
+  }
+
+  setupMediaPipeHands();
+}
+
+function draw() {
+  background(2, 6, 23);
+
+  drawMainPanel();
+  drawCameraView();
+  drawGameInfo();
+  drawGestureGuide();
+
+  if (gameState === "menu") {
+    drawMenuPanel();
+  }
+
+  if (gameState === "ended") {
+    drawEndedPanel();
+  }
+}
+
+function windowResized() {
+  const canvasW = min(windowWidth * 0.94, 980);
+  const canvasH = min(windowHeight * 0.9, 680);
+
+  resizeCanvas(canvasW, canvasH);
+}
+
+// ===============================
+// MediaPipe Hands 設定
+// ===============================
+
+function setupMediaPipeHands() {
+  hands = new Hands({
+    locateFile: function(file) {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }
+  });
 
-    h1 {
-      margin-top: 18px;
-      margin-bottom: 6px;
-      font-size: 32px;
-      letter-spacing: 2px;
-    }
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
 
-    .subtitle {
-      color: #cbd5e1;
-      margin-bottom: 10px;
-    }
+  hands.onResults(onHandsResults);
 
-    #canvasContainer {
-      display: flex;
-      justify-content: center;
-      margin-top: 10px;
-    }
-
-    .learning-box {
-      width: 90%;
-      max-width: 760px;
-      margin: 14px auto 24px;
-      padding: 14px 18px;
-      border-radius: 16px;
-      background: #fef3c7;
-      color: #78350f;
-      font-size: 15px;
-      line-height: 1.7;
-      text-align: left;
-      box-shadow: 0 8px 18px rgba(0,0,0,0.25);
-    }
-
-    video {
-      display: none;
-    }
-  </style>
-</head>
-
-<body>
-  <h1>AI 手勢魔法猜拳遊戲</h1>
-  <div class="subtitle">
-    遊戲中：✊石頭　✌️剪刀　✋布｜遊戲結束：✋繼續　✊結束
-  </div>
-
-  <div id="canvasContainer"></div>
-
-  <div class="learning-box">
-    <strong>學習小知識：</strong>
-    MediaPipe Hands 會偵測手上的 21 個關鍵點。
-    本作品透過比較「指尖」與「指節」的位置，判斷手指是否伸直，
-    進一步辨識石頭、剪刀、布，以及遊戲結束後的選單控制。
-  </div>
-
-  <video id="inputVideo"></video>
-
-  <script>
-    // =====================================================
-    // AI 手勢魔法猜拳遊戲
-    // p5.js + MediaPipe Hands 完整版
-    // =====================================================
-
-    let videoElement;
-    let hands;
-    let camera;
-
-    let handLandmarks = null;
-    let detectedGesture = "none";
-
-    // 遊戲狀態
-    let gameState = "playing"; 
-    // playing：遊戲中
-    // menu：遊戲結束選單
-    // ended：遊戲完全結束
-
-    let playerMove = "等待手勢";
-    let computerMove = "等待中";
-    let resultText = "請出拳：石頭、剪刀、布";
-    let scoreText = "請先完成一局遊戲";
-
-    let playerScore = 0;
-    let computerScore = 0;
-    let round = 1;
-    const maxRound = 3;
-
-    // 防止同一手勢連續觸發
-    let lastGameGesture = "none";
-    let lastGameGestureTime = 0;
-    const gameGestureCooldown = 1800;
-
-    // 選單手勢控制
-    const GESTURE_CONFIRM_TIME = 2000;
-    let currentMenuGesture = "none";
-    let gestureStartTime = null;
-    let gestureProgress = 0;
-    let menuStatus = "請做出手勢選擇";
-    let gestureTriggered = false;
-
-    function setup() {
-      const canvas = createCanvas(760, 560);
-      canvas.parent("canvasContainer");
-
-      videoElement = document.getElementById("inputVideo");
-
-      setupMediaPipeHands();
-    }
-
-    function draw() {
-      background(15, 23, 42);
-
-      drawMainPanel();
-      drawCameraView();
-      drawGameInfo();
-      drawGestureGuide();
-
-      if (gameState === "menu") {
-        drawMenuPanel();
+  camera = new Camera(videoElement, {
+    onFrame: async function() {
+      if (videoElement.readyState >= 2) {
+        await hands.send({ image: videoElement });
       }
+    },
+    width: 640,
+    height: 480,
+    facingMode: "user"
+  });
 
-      if (gameState === "ended") {
-        drawEndedPanel();
-      }
+  camera.start()
+    .then(function() {
+      cameraReady = true;
+      cameraStatus = "攝影機啟動成功";
+      console.log("攝影機啟動成功");
+    })
+    .catch(function(error) {
+      cameraReady = false;
+      cameraStatus = "攝影機啟動失敗，請檢查權限或 HTTPS";
+      console.error("攝影機啟動失敗：", error);
+      alert("攝影機啟動失敗：請確認是否允許相機權限，並使用 HTTPS 或 Live Server 開啟。");
+    });
+}
+
+function onHandsResults(results) {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    handLandmarks = results.multiHandLandmarks[0];
+    detectedGesture = detectGesture(handLandmarks);
+
+    if (gameState === "playing") {
+      handlePlayingGesture(detectedGesture);
+    } else if (gameState === "menu") {
+      handleMenuGesture(handLandmarks);
     }
+  } else {
+    handLandmarks = null;
+    detectedGesture = "none";
 
-    // =====================================================
-    // MediaPipe 設定
-    // =====================================================
-
-    function setupMediaPipeHands() {
-      hands = new Hands({
-        locateFile: function(file) {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-        }
-      });
-
-      hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7
-      });
-
-      hands.onResults(onHandsResults);
-
-      camera = new Camera(videoElement, {
-        onFrame: async function() {
-          await hands.send({ image: videoElement });
-        },
-        width: 640,
-        height: 480
-      });
-
-      camera.start();
-    }
-
-    function onHandsResults(results) {
-      if (
-        results.multiHandLandmarks &&
-        results.multiHandLandmarks.length > 0
-      ) {
-        handLandmarks = results.multiHandLandmarks[0];
-        detectedGesture = detectGesture(handLandmarks);
-
-        if (gameState === "playing") {
-          handlePlayingGesture(detectedGesture);
-        } else if (gameState === "menu") {
-          handleMenuGesture(handLandmarks);
-        }
-      } else {
-        handLandmarks = null;
-        detectedGesture = "none";
-
-        if (gameState === "menu") {
-          resetMenuGestureOnly();
-        }
-      }
-    }
-
-    // =====================================================
-    // 手勢辨識核心
-    // =====================================================
-
-    function isFingerExtended(landmarks, tip, pip) {
-      return landmarks[tip].y < landmarks[pip].y;
-    }
-
-    function detectGesture(landmarks) {
-      if (!landmarks || landmarks.length < 21) {
-        return "none";
-      }
-
-      const indexUp = isFingerExtended(landmarks, 8, 6);
-      const middleUp = isFingerExtended(landmarks, 12, 10);
-      const ringUp = isFingerExtended(landmarks, 16, 14);
-      const pinkyUp = isFingerExtended(landmarks, 20, 18);
-
-      const extendedCount = [
-        indexUp,
-        middleUp,
-        ringUp,
-        pinkyUp
-      ].filter(Boolean).length;
-
-      // 石頭：四根手指都沒有伸直
-      if (extendedCount === 0) {
-        return "rock";
-      }
-
-      // 剪刀：食指與中指伸直，無名指與小指彎曲
-      if (indexUp && middleUp && !ringUp && !pinkyUp) {
-        return "scissors";
-      }
-
-      // 布：四根手指都伸直
-      if (extendedCount >= 4) {
-        return "paper";
-      }
-
-      return "unknown";
-    }
-
-    function gestureToChinese(gesture) {
-      if (gesture === "rock") return "石頭 ✊";
-      if (gesture === "scissors") return "剪刀 ✌️";
-      if (gesture === "paper") return "布 ✋";
-      if (gesture === "unknown") return "手勢不明確";
-      return "尚未偵測";
-    }
-
-    // =====================================================
-    // 遊戲中手勢處理
-    // =====================================================
-
-    function handlePlayingGesture(gesture) {
-      if (gesture !== "rock" && gesture !== "scissors" && gesture !== "paper") {
-        return;
-      }
-
-      const now = millis();
-
-      if (
-        gesture === lastGameGesture &&
-        now - lastGameGestureTime < gameGestureCooldown
-      ) {
-        return;
-      }
-
-      lastGameGesture = gesture;
-      lastGameGestureTime = now;
-
-      playRound(gesture);
-    }
-
-    function playRound(playerGesture) {
-      const choices = ["rock", "scissors", "paper"];
-      const computerGesture = random(choices);
-
-      playerMove = gestureToChinese(playerGesture);
-      computerMove = gestureToChinese(computerGesture);
-
-      const winner = getWinner(playerGesture, computerGesture);
-
-      if (winner === "player") {
-        playerScore++;
-        resultText = "你贏了這一回合！AI 被你打敗了 🎉";
-      } else if (winner === "computer") {
-        computerScore++;
-        resultText = "電腦贏了這一回合，再試一次 💪";
-      } else {
-        resultText = "平手！你們太有默契了 🤝";
-      }
-
-      scoreText = `第 ${round} / ${maxRound} 回合｜你 ${playerScore}：${computerScore} 電腦`;
-
-      if (round >= maxRound) {
-        setTimeout(() => {
-          enterMenuState();
-        }, 600);
-      } else {
-        round++;
-      }
-    }
-
-    function getWinner(player, computer) {
-      if (player === computer) return "draw";
-
-      if (
-        (player === "rock" && computer === "scissors") ||
-        (player === "scissors" && computer === "paper") ||
-        (player === "paper" && computer === "rock")
-      ) {
-        return "player";
-      }
-
-      return "computer";
-    }
-
-    function enterMenuState() {
-      gameState = "menu";
-
-      if (playerScore > computerScore) {
-        resultText = "三回合結束：你獲得勝利！太強了 👑";
-      } else if (playerScore < computerScore) {
-        resultText = "三回合結束：電腦獲勝！下次一定可以贏 🔥";
-      } else {
-        resultText = "三回合結束：平手！勢均力敵 ⚖️";
-      }
-
-      menuStatus = "請選擇：張開手掌繼續，握拳結束";
+    if (gameState === "menu") {
       resetMenuGestureOnly();
     }
+  }
+}
 
-    // =====================================================
-    // 遊戲結束選單手勢
-    // =====================================================
+// ===============================
+// 手勢辨識核心
+// ===============================
 
-    function handleMenuGesture(landmarks) {
-      const gesture = detectGesture(landmarks);
+function isFingerExtended(landmarks, tip, pip) {
+  return landmarks[tip].y < landmarks[pip].y;
+}
 
-      let menuGesture = "none";
+function detectGesture(landmarks) {
+  if (!landmarks || landmarks.length < 21) {
+    return "none";
+  }
 
-      if (gesture === "paper") {
-        menuGesture = "continue";
-      } else if (gesture === "rock") {
-        menuGesture = "exit";
-      }
+  const indexUp = isFingerExtended(landmarks, 8, 6);
+  const middleUp = isFingerExtended(landmarks, 12, 10);
+  const ringUp = isFingerExtended(landmarks, 16, 14);
+  const pinkyUp = isFingerExtended(landmarks, 20, 18);
 
-      const now = millis();
+  const extendedCount = [
+    indexUp,
+    middleUp,
+    ringUp,
+    pinkyUp
+  ].filter(Boolean).length;
 
-      if (menuGesture === "none") {
-        resetMenuGestureOnly();
-        menuStatus = "請做出明確手勢：✋繼續 或 ✊結束";
-        return;
-      }
+  // 石頭：四根手指都彎曲
+  if (extendedCount === 0) {
+    return "rock";
+  }
 
-      if (menuGesture !== currentMenuGesture) {
-        currentMenuGesture = menuGesture;
-        gestureStartTime = now;
-        gestureProgress = 0;
-        gestureTriggered = false;
+  // 剪刀：食指、中指伸直；無名指、小指彎曲
+  if (indexUp && middleUp && !ringUp && !pinkyUp) {
+    return "scissors";
+  }
 
-        if (menuGesture === "continue") {
-          menuStatus = "偵測到張開手掌，請保持 2 秒";
-        } else if (menuGesture === "exit") {
-          menuStatus = "偵測到握拳，請保持 2 秒";
-        }
+  // 布：四根手指都伸直
+  if (extendedCount >= 4) {
+    return "paper";
+  }
 
-        return;
-      }
+  return "unknown";
+}
 
-      const elapsed = now - gestureStartTime;
-      gestureProgress = constrain(
-        elapsed / GESTURE_CONFIRM_TIME,
-        0,
-        1
-      );
+function gestureToChinese(gesture) {
+  if (gesture === "rock") return "石頭 ✊";
+  if (gesture === "scissors") return "剪刀 ✌️";
+  if (gesture === "paper") return "布 ✋";
+  if (gesture === "unknown") return "手勢不明確";
+  return "尚未偵測";
+}
 
-      if (elapsed >= GESTURE_CONFIRM_TIME && !gestureTriggered) {
-        gestureTriggered = true;
+// ===============================
+// 遊戲邏輯
+// ===============================
 
-        if (menuGesture === "continue") {
-          menuStatus = "確認成功：繼續遊戲！";
-          setTimeout(() => {
-            restartGame();
-          }, 500);
-        } else if (menuGesture === "exit") {
-          menuStatus = "確認成功：結束遊戲！";
-          setTimeout(() => {
-            endGame();
-          }, 500);
-        }
-      }
+function handlePlayingGesture(gesture) {
+  if (gesture !== "rock" && gesture !== "scissors" && gesture !== "paper") {
+    return;
+  }
+
+  const now = millis();
+
+  if (
+    gesture === lastGameGesture &&
+    now - lastGameGestureTime < gameGestureCooldown
+  ) {
+    return;
+  }
+
+  lastGameGesture = gesture;
+  lastGameGestureTime = now;
+
+  playRound(gesture);
+}
+
+function playRound(playerGesture) {
+  const choices = ["rock", "scissors", "paper"];
+  const computerGesture = random(choices);
+
+  playerMove = gestureToChinese(playerGesture);
+  computerMove = gestureToChinese(computerGesture);
+
+  const winner = getWinner(playerGesture, computerGesture);
+
+  if (winner === "player") {
+    playerScore++;
+    resultText = "你贏了這一回合！AI 被你打敗了 🎉";
+  } else if (winner === "computer") {
+    computerScore++;
+    resultText = "電腦贏了這一回合，再試一次 💪";
+  } else {
+    resultText = "平手！你們太有默契了 🤝";
+  }
+
+  scoreText = `第 ${round} / ${maxRound} 回合｜你 ${playerScore}：${computerScore} 電腦`;
+
+  if (round >= maxRound) {
+    setTimeout(function() {
+      enterMenuState();
+    }, 650);
+  } else {
+    round++;
+  }
+}
+
+function getWinner(player, computer) {
+  if (player === computer) return "draw";
+
+  if (
+    (player === "rock" && computer === "scissors") ||
+    (player === "scissors" && computer === "paper") ||
+    (player === "paper" && computer === "rock")
+  ) {
+    return "player";
+  }
+
+  return "computer";
+}
+
+function enterMenuState() {
+  gameState = "menu";
+
+  if (playerScore > computerScore) {
+    resultText = "三回合結束：你獲得勝利！太強了 👑";
+  } else if (playerScore < computerScore) {
+    resultText = "三回合結束：電腦獲勝！下次一定可以贏 🔥";
+  } else {
+    resultText = "三回合結束：平手！勢均力敵 ⚖️";
+  }
+
+  menuStatus = "請選擇：張開手掌繼續，握拳結束";
+  resetMenuGestureOnly();
+}
+
+// ===============================
+// 遊戲結束選單手勢
+// ===============================
+
+function handleMenuGesture(landmarks) {
+  const gesture = detectGesture(landmarks);
+
+  let menuGesture = "none";
+
+  if (gesture === "paper") {
+    menuGesture = "continue";
+  } else if (gesture === "rock") {
+    menuGesture = "exit";
+  }
+
+  const now = millis();
+
+  if (menuGesture === "none") {
+    resetMenuGestureOnly();
+    menuStatus = "請做出明確手勢：✋繼續 或 ✊結束";
+    return;
+  }
+
+  if (menuGesture !== currentMenuGesture) {
+    currentMenuGesture = menuGesture;
+    gestureStartTime = now;
+    gestureProgress = 0;
+    gestureTriggered = false;
+
+    if (menuGesture === "continue") {
+      menuStatus = "偵測到張開手掌，請保持 2 秒";
+    } else if (menuGesture === "exit") {
+      menuStatus = "偵測到握拳，請保持 2 秒";
     }
 
-    function resetMenuGestureOnly() {
-      currentMenuGesture = "none";
-      gestureStartTime = null;
-      gestureProgress = 0;
-      gestureTriggered = false;
+    return;
+  }
+
+  const elapsed = now - gestureStartTime;
+  gestureProgress = constrain(elapsed / GESTURE_CONFIRM_TIME, 0, 1);
+
+  if (elapsed >= GESTURE_CONFIRM_TIME && !gestureTriggered) {
+    gestureTriggered = true;
+
+    if (menuGesture === "continue") {
+      menuStatus = "確認成功：繼續遊戲！";
+
+      setTimeout(function() {
+        restartGame();
+      }, 500);
+    } else if (menuGesture === "exit") {
+      menuStatus = "確認成功：結束遊戲！";
+
+      setTimeout(function() {
+        endGame();
+      }, 500);
     }
+  }
+}
 
-    function restartGame() {
-      gameState = "playing";
-      playerMove = "等待手勢";
-      computerMove = "等待中";
-      resultText = "新的一局開始！請出拳：石頭、剪刀、布";
-      scoreText = "請先完成一局遊戲";
-      playerScore = 0;
-      computerScore = 0;
-      round = 1;
-      lastGameGesture = "none";
-      lastGameGestureTime = 0;
-      resetMenuGestureOnly();
-    }
+function resetMenuGestureOnly() {
+  currentMenuGesture = "none";
+  gestureStartTime = null;
+  gestureProgress = 0;
+  gestureTriggered = false;
+}
 
-    function endGame() {
-      gameState = "ended";
-      resultText = "遊戲已結束，感謝遊玩！";
-      scoreText = "你已完成 AI 手勢互動體驗";
-      resetMenuGestureOnly();
-    }
+function restartGame() {
+  gameState = "playing";
+  playerMove = "等待手勢";
+  computerMove = "等待中";
+  resultText = "新的一局開始！請出拳：石頭、剪刀、布";
+  scoreText = "請先完成一局遊戲";
+  playerScore = 0;
+  computerScore = 0;
+  round = 1;
+  lastGameGesture = "none";
+  lastGameGestureTime = 0;
+  resetMenuGestureOnly();
+}
 
-    // =====================================================
-    // 畫面繪製
-    // =====================================================
+function endGame() {
+  gameState = "ended";
+  resultText = "遊戲已結束，感謝遊玩！";
+  scoreText = "你已完成 AI 手勢辨識互動體驗";
+  resetMenuGestureOnly();
+}
 
-    function drawMainPanel() {
-      noStroke();
-      fill(30, 41, 59);
-      rect(20, 20, width - 40, height - 40, 24);
+// ===============================
+// 畫面繪製：專業網站版
+// ===============================
 
-      fill(255);
-      textAlign(CENTER, CENTER);
-      textSize(28);
-      textStyle(BOLD);
-      text("AI 手勢魔法猜拳遊戲", width / 2, 52);
+function drawMainPanel() {
+  noStroke();
 
-      textSize(15);
-      textStyle(NORMAL);
-      fill(203, 213, 225);
-      text("使用手勢與 AI 互動，學習 MediaPipe 手部辨識原理", width / 2, 82);
-    }
+  // 主卡片
+  fill(15, 23, 42, 245);
+  rect(0, 0, width, height, 28);
 
-    function drawCameraView() {
-      const camX = 50;
-      const camY = 110;
-      const camW = 360;
-      const camH = 270;
+  // 內層玻璃感
+  fill(30, 41, 59, 220);
+  rect(22, 22, width - 44, height - 44, 26);
 
-      push();
-      translate(camX + camW, camY);
-      scale(-1, 1);
+  // 裝飾光暈
+  fill(56, 189, 248, 32);
+  circle(width - 90, 90, 180);
 
-      if (videoElement && videoElement.readyState >= 2) {
-        image(videoElement, 0, 0, camW, camH);
-      } else {
-        fill(15, 23, 42);
-        rect(0, 0, camW, camH);
-      }
+  fill(168, 85, 247, 28);
+  circle(95, height - 75, 190);
 
-      pop();
+  fill(34, 197, 94, 18);
+  circle(width * 0.5, height + 20, 260);
 
-      noFill();
-      stroke(148, 163, 184);
-      strokeWeight(3);
-      rect(camX, camY, camW, camH, 18);
+  // 標題
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(min(width * 0.04, 34));
+  textStyle(BOLD);
+  text("AI 手勢魔法猜拳遊戲", width / 2, 56);
 
-      drawHandPoints(camX, camY, camW, camH);
-    }
+  textStyle(NORMAL);
+  textSize(min(width * 0.018, 16));
+  fill(203, 213, 225);
+  text("使用手勢與 AI 互動，學習 MediaPipe 手部辨識原理", width / 2, 88);
+}
 
-    function drawHandPoints(camX, camY, camW, camH) {
-      if (!handLandmarks) return;
+function drawCameraView() {
+  const panelPadding = 36;
 
-      push();
+  const camX = panelPadding;
+  const camY = 125;
+  const camW = width * 0.48;
+  const camH = height * 0.48;
 
-      for (let i = 0; i < handLandmarks.length; i++) {
-        const lm = handLandmarks[i];
+  // 相機卡片陰影
+  noStroke();
+  fill(2, 6, 23, 150);
+  rect(camX - 8, camY - 8, camW + 16, camH + 46, 28);
 
-        // 因為鏡頭有左右翻轉，所以 x 也反轉
-        const x = camX + (1 - lm.x) * camW;
-        const y = camY + lm.y * camH;
+  push();
+  translate(camX + camW, camY);
+  scale(-1, 1);
 
-        noStroke();
-        fill(250, 204, 21);
-        circle(x, y, 7);
-      }
+  if (videoElement && videoElement.readyState >= 2) {
+    image(videoElement, 0, 0, camW, camH);
+  } else {
+    fill(15, 23, 42);
+    rect(0, 0, camW, camH, 24);
 
-      pop();
-    }
+    push();
+    scale(-1, 1);
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textSize(15);
+    text(cameraStatus, -camW / 2, camH / 2);
+    pop();
+  }
 
-    function drawGameInfo() {
-      const infoX = 440;
-      const infoY = 110;
-      const infoW = 270;
-      const infoH = 270;
+  pop();
 
-      noStroke();
-      fill(15, 23, 42);
-      rect(infoX, infoY, infoW, infoH, 18);
+  noFill();
+  stroke(125, 211, 252, 190);
+  strokeWeight(3);
+  rect(camX, camY, camW, camH, 24);
 
-      fill(255);
-      textAlign(LEFT, TOP);
-      textSize(20);
-      textStyle(BOLD);
-      text("遊戲資訊", infoX + 22, infoY + 20);
+  // 上方標籤
+  noStroke();
+  fill(14, 165, 233);
+  rect(camX + 18, camY + 16, 112, 30, 999);
 
-      textStyle(NORMAL);
-      textSize(16);
-      fill(226, 232, 240);
-      text(`目前狀態：${getGameStateText()}`, infoX + 22, infoY + 62);
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(13);
+  textStyle(BOLD);
+  text("LIVE CAMERA", camX + 74, camY + 31);
 
-      text(`你出：${playerMove}`, infoX + 22, infoY + 98);
-      text(`電腦：${computerMove}`, infoX + 22, infoY + 134);
+  drawHandPoints(camX, camY, camW, camH);
 
+  noStroke();
+  fill(cameraReady ? color(34, 197, 94) : color(250, 204, 21));
+  textAlign(LEFT, CENTER);
+  textSize(13);
+  textStyle(NORMAL);
+  text(cameraStatus, camX + 12, camY + camH + 24);
+}
+
+function drawHandPoints(camX, camY, camW, camH) {
+  if (!handLandmarks) return;
+
+  push();
+
+  // 先畫簡單骨架線
+  const connections = [
+    [0, 1], [1, 2], [2, 3], [3, 4],
+    [0, 5], [5, 6], [6, 7], [7, 8],
+    [0, 9], [9, 10], [10, 11], [11, 12],
+    [0, 13], [13, 14], [14, 15], [15, 16],
+    [0, 17], [17, 18], [18, 19], [19, 20],
+    [5, 9], [9, 13], [13, 17]
+  ];
+
+  stroke(34, 211, 238, 180);
+  strokeWeight(2);
+
+  for (let i = 0; i < connections.length; i++) {
+    const a = handLandmarks[connections[i][0]];
+    const b = handLandmarks[connections[i][1]];
+
+    const ax = camX + (1 - a.x) * camW;
+    const ay = camY + a.y * camH;
+    const bx = camX + (1 - b.x) * camW;
+    const by = camY + b.y * camH;
+
+    line(ax, ay, bx, by);
+  }
+
+  // 再畫關鍵點
+  for (let i = 0; i < handLandmarks.length; i++) {
+    const lm = handLandmarks[i];
+
+    const x = camX + (1 - lm.x) * camW;
+    const y = camY + lm.y * camH;
+
+    noStroke();
+
+    if ([4, 8, 12, 16, 20].includes(i)) {
       fill(250, 204, 21);
-      textSize(17);
-      text(resultText, infoX + 22, infoY + 172, infoW - 44, 70);
-
-      fill(125, 211, 252);
-      textSize(15);
-      text(scoreText, infoX + 22, infoY + 238);
-    }
-
-    function drawGestureGuide() {
-      const x = 50;
-      const y = 405;
-      const w = 660;
-      const h = 110;
-
-      noStroke();
-      fill(51, 65, 85);
-      rect(x, y, w, h, 18);
-
+      circle(x, y, 11);
+    } else {
       fill(255);
-      textAlign(LEFT, TOP);
-      textSize(18);
-      textStyle(BOLD);
-      text("手勢操作說明", x + 22, y + 16);
-
-      textStyle(NORMAL);
-      textSize(15);
-      fill(226, 232, 240);
-
-      if (gameState === "playing") {
-        text("遊戲中請出拳：✊ 石頭　✌️ 剪刀　✋ 布", x + 22, y + 50);
-        text(`目前 AI 偵測：${gestureToChinese(detectedGesture)}`, x + 22, y + 78);
-      } else if (gameState === "menu") {
-        text("遊戲結束選單：✋ 張開手掌保持 2 秒＝繼續　✊ 握拳保持 2 秒＝結束", x + 22, y + 50);
-        text(`目前選單狀態：${menuStatus}`, x + 22, y + 78);
-      } else {
-        text("遊戲已結束，重新整理網頁可以再次開始。", x + 22, y + 55);
-      }
+      circle(x, y, 6);
     }
+  }
 
-    function drawMenuPanel() {
-      const x = 90;
-      const y = 150;
-      const w = 580;
-      const h = 220;
+  pop();
+}
 
-      noStroke();
-      fill(0, 0, 0, 170);
-      rect(0, 0, width, height);
+function drawGameInfo() {
+  const infoX = width * 0.55;
+  const infoY = 125;
+  const infoW = width * 0.38;
+  const infoH = height * 0.48;
 
-      fill(248, 250, 252);
-      rect(x, y, w, h, 24);
+  noStroke();
+  fill(2, 6, 23, 165);
+  rect(infoX - 8, infoY - 8, infoW + 16, infoH + 16, 28);
 
-      fill(15, 23, 42);
-      textAlign(CENTER, TOP);
-      textSize(26);
-      textStyle(BOLD);
-      text("遊戲結束選單", width / 2, y + 24);
+  fill(15, 23, 42, 220);
+  rect(infoX, infoY, infoW, infoH, 24);
 
-      textStyle(NORMAL);
-      textSize(18);
-      fill(51, 65, 85);
-      text("請使用 AI 手勢選擇下一步", width / 2, y + 68);
+  // 小標籤
+  fill(99, 102, 241);
+  rect(infoX + 22, infoY + 18, 92, 30, 999);
 
-      textSize(20);
-      fill(22, 101, 52);
-      text("✋ 張開手掌 2 秒：繼續遊戲", width / 2, y + 105);
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(13);
+  textStyle(BOLD);
+  text("GAME INFO", infoX + 68, infoY + 33);
 
-      fill(153, 27, 27);
-      text("✊ 握拳 2 秒：結束遊戲", width / 2, y + 137);
+  fill(255);
+  textAlign(LEFT, TOP);
+  textSize(22);
+  textStyle(BOLD);
+  text("遊戲資訊", infoX + 24, infoY + 62);
 
-      drawProgressBar(x + 80, y + 175, w - 160, 22);
-    }
+  textStyle(NORMAL);
+  textSize(16);
+  fill(226, 232, 240);
 
-    function drawProgressBar(x, y, w, h) {
-      noStroke();
-      fill(226, 232, 240);
-      rect(x, y, w, h, 999);
+  text(`目前狀態：${getGameStateText()}`, infoX + 24, infoY + 105);
+  text(`你出：${playerMove}`, infoX + 24, infoY + 143);
+  text(`電腦：${computerMove}`, infoX + 24, infoY + 181);
 
-      let barColor;
+  fill(250, 204, 21);
+  textSize(17);
+  text(resultText, infoX + 24, infoY + 228, infoW - 48, 90);
 
-      if (currentMenuGesture === "continue") {
-        barColor = color(34, 197, 94);
-      } else if (currentMenuGesture === "exit") {
-        barColor = color(239, 68, 68);
-      } else {
-        barColor = color(148, 163, 184);
-      }
+  // 分數膠囊
+  const scoreY = infoY + infoH - 55;
 
-      fill(barColor);
-      rect(x, y, w * gestureProgress, h, 999);
+  fill(8, 47, 73, 220);
+  rect(infoX + 22, scoreY, infoW - 44, 34, 999);
 
-      fill(15, 23, 42);
-      textAlign(CENTER, CENTER);
-      textSize(13);
-      textStyle(BOLD);
-      text(`${Math.floor(gestureProgress * 100)}%`, x + w / 2, y + h / 2);
-    }
+  fill(125, 211, 252);
+  textAlign(CENTER, CENTER);
+  textSize(15);
+  textStyle(BOLD);
+  text(scoreText, infoX + infoW / 2, scoreY + 17);
+}
 
-    function drawEndedPanel() {
-      const x = 120;
-      const y = 160;
-      const w = 520;
-      const h = 190;
+function drawGestureGuide() {
+  const x = 36;
+  const y = height - 145;
+  const w = width - 72;
+  const h = 105;
 
-      noStroke();
-      fill(0, 0, 0, 180);
-      rect(0, 0, width, height);
+  noStroke();
+  fill(2, 6, 23, 145);
+  rect(x - 6, y - 6, w + 12, h + 12, 28);
 
-      fill(248, 250, 252);
-      rect(x, y, w, h, 24);
+  fill(51, 65, 85, 220);
+  rect(x, y, w, h, 22);
 
-      fill(15, 23, 42);
-      textAlign(CENTER, CENTER);
-      textSize(30);
-      textStyle(BOLD);
-      text("感謝遊玩！", width / 2, y + 55);
+  fill(255);
+  textAlign(LEFT, TOP);
+  textSize(18);
+  textStyle(BOLD);
+  text("手勢操作說明", x + 26, y + 18);
 
-      textStyle(NORMAL);
-      textSize(18);
-      fill(71, 85, 105);
-      text("你已完成 AI 手勢辨識互動體驗", width / 2, y + 105);
+  textStyle(NORMAL);
+  textSize(15);
+  fill(226, 232, 240);
 
-      textSize(15);
-      fill(100, 116, 139);
-      text("若要重新開始，請重新整理網頁", width / 2, y + 145);
-    }
+  if (gameState === "playing") {
+    text("遊戲中請出拳：✊ 石頭　✌️ 剪刀　✋ 布", x + 26, y + 52);
+    text(`目前 AI 偵測：${gestureToChinese(detectedGesture)}`, x + 26, y + 78);
+  } else if (gameState === "menu") {
+    text("遊戲結束選單：✋ 張開手掌保持 2 秒＝繼續　✊ 握拳保持 2 秒＝結束", x + 26, y + 52);
+    text(`目前選單狀態：${menuStatus}`, x + 26, y + 78);
+  } else {
+    text("遊戲已結束，重新整理網頁可以再次開始。", x + 26, y + 60);
+  }
+}
 
-    function getGameStateText() {
-      if (gameState === "playing") return "遊戲進行中";
-      if (gameState === "menu") return "等待選單手勢";
-      if (gameState === "ended") return "遊戲已結束";
-      return "未知";
-    }
-  </script>
-</body>
-</html>
+function drawMenuPanel() {
+  const x = width * 0.15;
+  const y = height * 0.24;
+  const w = width * 0.7;
+  const h = height * 0.36;
+
+  noStroke();
+  fill(0, 0, 0, 175);
+  rect(0, 0, width, height, 28);
+
+  fill(248, 250, 252);
+  rect(x, y, w, h, 28);
+
+  fill(15, 23, 42);
+  textAlign(CENTER, TOP);
+  textSize(min(width * 0.035, 30));
+  textStyle(BOLD);
+  text("遊戲結束選單", width / 2, y + 28);
+
+  textStyle(NORMAL);
+  textSize(min(width * 0.022, 18));
+  fill(51, 65, 85);
+  text("請使用 AI 手勢選擇下一步", width / 2, y + 78);
+
+  textSize(min(width * 0.024, 21));
+  fill(22, 101, 52);
+  text("✋ 張開手掌 2 秒：繼續遊戲", width / 2, y + 122);
+
+  fill(153, 27, 27);
+  text("✊ 握拳 2 秒：結束遊戲", width / 2, y + 158);
+
+  drawProgressBar(x + w * 0.16, y + h - 54, w * 0.68, 24);
+}
+
+function drawProgressBar(x, y, w, h) {
+  noStroke();
+  fill(226, 232, 240);
+  rect(x, y, w, h, 999);
+
+  if (currentMenuGesture === "continue") {
+    fill(34, 197, 94);
+  } else if (currentMenuGesture === "exit") {
+    fill(239, 68, 68);
+  } else {
+    fill(148, 163, 184);
+  }
+
+  rect(x, y, w * gestureProgress, h, 999);
+
+  fill(15, 23, 42);
+  textAlign(CENTER, CENTER);
+  textSize(13);
+  textStyle(BOLD);
+  text(`${Math.floor(gestureProgress * 100)}%`, x + w / 2, y + h / 2);
+}
+
+function drawEndedPanel() {
+  const x = width * 0.18;
+  const y = height * 0.28;
+  const w = width * 0.64;
+  const h = height * 0.3;
+
+  noStroke();
+  fill(0, 0, 0, 185);
+  rect(0, 0, width, height, 28);
+
+  fill(248, 250, 252);
+  rect(x, y, w, h, 28);
+
+  fill(15, 23, 42);
+  textAlign(CENTER, CENTER);
+  textSize(min(width * 0.04, 34));
+  textStyle(BOLD);
+  text("感謝遊玩！", width / 2, y + h * 0.32);
+
+  textStyle(NORMAL);
+  textSize(min(width * 0.023, 19));
+  fill(71, 85, 105);
+  text("你已完成 AI 手勢辨識互動體驗", width / 2, y + h * 0.58);
+
+  textSize(min(width * 0.018, 15));
+  fill(100, 116, 139);
+  text("若要重新開始，請重新整理網頁", width / 2, y + h * 0.78);
+}
+
+function getGameStateText() {
+  if (gameState === "playing") return "遊戲進行中";
+  if (gameState === "menu") return "等待選單手勢";
+  if (gameState === "ended") return "遊戲已結束";
+  return "未知";
+}
