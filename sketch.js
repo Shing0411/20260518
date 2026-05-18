@@ -105,6 +105,7 @@ function draw() {
   scale(viewScale);
 
   drawMainPanel();
+  drawCreatorBadge();
   drawCameraView();
   drawGameInfo();
   drawGestureGuide();
@@ -559,6 +560,53 @@ function drawMainPanel() {
   text("每回合結果視窗｜防連續誤判｜選單手勢獨立設計", DESIGN_W / 2, 96);
 }
 
+function drawCreatorBadge() {
+  const badgeX = DESIGN_W - 390;
+  const badgeY = 40;
+  const badgeW = 315;
+  const badgeH = 58;
+
+  push();
+
+  noStroke();
+
+  // 外層光暈
+  fill(56, 189, 248, 34);
+  rect(badgeX - 7, badgeY - 7, badgeW + 14, badgeH + 14, 24);
+
+  // 主體膠囊
+  fill(2, 6, 23, 220);
+  rect(badgeX, badgeY, badgeW, badgeH, 20);
+
+  // 左側裝飾點
+  fill(34, 211, 238);
+  circle(badgeX + 28, badgeY + badgeH / 2, 14);
+
+  fill(250, 204, 21);
+  circle(badgeX + 28, badgeY + badgeH / 2, 6);
+
+  // 線條裝飾
+  stroke(56, 189, 248, 120);
+  strokeWeight(2);
+  line(badgeX + 48, badgeY + 14, badgeX + 48, badgeY + badgeH - 14);
+
+  noStroke();
+
+  textAlign(LEFT, CENTER);
+
+  textStyle(BOLD);
+  textSize(14);
+  fill(125, 211, 252);
+  text("CREATOR", badgeX + 62, badgeY + 19);
+
+  textStyle(BOLD);
+  textSize(17);
+  fill(255);
+  text("414736529  王家興創作", badgeX + 62, badgeY + 40);
+
+  pop();
+}
+
 function drawCameraView() {
   const camX = 56;
   const camY = 135;
@@ -918,43 +966,4 @@ function getGameStateText() {
   if (gameState === "menu") return "等待選單手勢";
   if (gameState === "ended") return "遊戲已結束";
   return "未知";
-}
-function drawCreatorBadge() {
-  const badgeX = DESIGN_W - 360;
-  const badgeY = 42;
-  const badgeW = 285;
-  const badgeH = 54;
-
-  push();
-
-  // 外層光暈
-  noStroke();
-  fill(56, 189, 248, 35);
-  rect(badgeX - 6, badgeY - 6, badgeW + 12, badgeH + 12, 22);
-
-  // 主體膠囊
-  fill(2, 6, 23, 210);
-  rect(badgeX, badgeY, badgeW, badgeH, 18);
-
-  // 左側小亮點
-  fill(34, 211, 238);
-  circle(badgeX + 26, badgeY + badgeH / 2, 12);
-
-  fill(250, 204, 21);
-  circle(badgeX + 26, badgeY + badgeH / 2, 5);
-
-  // 文字
-  textAlign(LEFT, CENTER);
-
-  textStyle(BOLD);
-  textSize(15);
-  fill(255);
-  text("CREATOR", badgeX + 46, badgeY + 18);
-
-  textStyle(NORMAL);
-  textSize(16);
-  fill(203, 213, 225);
-  text("414736529  王家興創作", badgeX + 46, badgeY + 38);
-
-  pop();
 }
