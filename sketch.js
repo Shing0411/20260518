@@ -19,12 +19,13 @@ let cameraError = "";
 // 遊戲狀態
 let gameState = "playing";
 // playing：遊戲中
-// menu：遊戲結束選單
+// roundResult：回合結果視窗
+// menu：三回合結束選單
 // ended：遊戲結束
 
 let playerMove = "等待手勢";
 let computerMove = "等待中";
-let resultText = "請出拳：石頭、剪刀、布";
+let resultText = "第 1 回合開始，請出拳";
 let scoreText = "第 1 / 3 回合";
 
 // 分數與回合
@@ -33,34 +34,39 @@ let computerScore = 0;
 let round = 1;
 const maxRound = 3;
 
-// 回合節奏控制
-let roundLocked = false;
-let roundUnlockTime = 0;
-const ROUND_PAUSE_TIME = 2200;
+// 回合結果視窗
+let roundResultTitle = "";
+let roundResultMessage = "";
+let roundResultEmoji = "";
+let roundResultStartTime = 0;
+const ROUND_RESULT_TIME = 3000;
 
-// 遊戲出拳確認，避免一偵測到就立刻觸發
+// 下一回合開始後，必須先放開手勢，避免連續誤判
+let needReleaseHand = false;
+
+// 出拳確認
 let currentPlayGesture = "none";
 let playGestureStartTime = null;
 let playGestureProgress = 0;
-const PLAY_CONFIRM_TIME = 800;
+const PLAY_CONFIRM_TIME = 900;
 
 // 選單手勢確認
-const GESTURE_CONFIRM_TIME = 2000;
+const MENU_CONFIRM_TIME = 2000;
 let currentMenuGesture = "none";
-let gestureStartTime = null;
-let gestureProgress = 0;
+let menuGestureStartTime = null;
+let menuGestureProgress = 0;
 let menuStatus = "請做出手勢選擇";
-let gestureTriggered = false;
+let menuGestureTriggered = false;
 
 // 防止 MediaPipe 重複處理影像
 let isSendingFrame = false;
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  const cnv = createCanvas(windowWidth, windowHeight);
 
   const app = document.getElementById("app");
   if (app) {
-    canvas.parent("app");
+    cnv.parent("app");
   }
 
   calculateViewTransform();
@@ -103,8 +109,9 @@ function draw() {
   drawGameInfo();
   drawGestureGuide();
 
-  if (roundLocked && gameState === "playing") {
-    drawRoundPauseOverlay();
+  if (gameState === "roundResult") {
+    drawRoundResultModal();
+    updateRoundResultModal();
   }
 
   if (gameState === "menu") {
@@ -116,8 +123,6 @@ function draw() {
   }
 
   pop();
-
-  updateRoundLock();
 }
 
 function windowResized() {
@@ -180,18 +185,25 @@ async function sendFrameToMediaPipe() {
 function onHandsResults(results) {
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
     handLandmarks = results.multiHandLandmarks[0];
+
     detectedGesture = detectGesture(handLandmarks);
 
     if (gameState === "playing") {
       handlePlayingGesture(detectedGesture);
-    } else if (gameState === "menu") {
+    }
+
+    if (gameState === "menu") {
       handleMenuGesture(handLandmarks);
     }
   } else {
     handLandmarks = null;
     detectedGesture = "none";
-
     resetPlayGestureOnly();
+
+    if (needReleaseHand && gameState === "playing") {
+      needReleaseHand = false;
+      resultText = `第 ${round} 回合開始，請出拳`;
+    }
 
     if (gameState === "menu") {
       resetMenuGestureOnly();
@@ -225,12 +237,14 @@ function getFingerStates(landmarks) {
   };
 }
 
+// 遊戲中：石頭、剪刀、布
 function detectGesture(landmarks) {
   if (!landmarks || landmarks.length < 21) {
     return "none";
   }
 
   const fingers = getFingerStates(landmarks);
+
   const indexUp = fingers.indexUp;
   const middleUp = fingers.middleUp;
   const ringUp = fingers.ringUp;
@@ -243,17 +257,14 @@ function detectGesture(landmarks) {
     pinkyUp
   ].filter(Boolean).length;
 
-  // 石頭：四根手指都彎曲
   if (extendedCount === 0) {
     return "rock";
   }
 
-  // 剪刀：食指、中指伸直；無名指、小指彎曲
   if (indexUp && middleUp && !ringUp && !pinkyUp) {
     return "scissors";
   }
 
-  // 布：四根手指都伸直
   if (extendedCount >= 4) {
     return "paper";
   }
@@ -261,13 +272,14 @@ function detectGesture(landmarks) {
   return "unknown";
 }
 
-// 選單專用手勢：故意避開石頭、剪刀、布
+// 三回合結束後選單：特別避開石頭、剪刀、布
 function detectMenuGesture(landmarks) {
   if (!landmarks || landmarks.length < 21) {
     return "none";
   }
 
   const fingers = getFingerStates(landmarks);
+
   const indexUp = fingers.indexUp;
   const middleUp = fingers.middleUp;
   const ringUp = fingers.ringUp;
@@ -294,18 +306,16 @@ function gestureToChinese(gesture) {
   return "尚未偵測";
 }
 
-function menuGestureToChinese(gesture) {
-  if (gesture === "continue") return "只伸食指 ☝️";
-  if (gesture === "exit") return "只伸小指 🤙";
-  return "尚未偵測";
-}
-
 // =====================================================
 // 遊戲邏輯
 // =====================================================
 
 function handlePlayingGesture(gesture) {
-  if (roundLocked) return;
+  if (needReleaseHand) {
+    resultText = "請先放開手勢，再開始下一回合";
+    resetPlayGestureOnly();
+    return;
+  }
 
   if (gesture !== "rock" && gesture !== "scissors" && gesture !== "paper") {
     resetPlayGestureOnly();
@@ -337,8 +347,6 @@ function resetPlayGestureOnly() {
 }
 
 function playRound(playerGesture) {
-  if (roundLocked) return;
-
   const choices = ["rock", "scissors", "paper"];
   const computerGesture = random(choices);
 
@@ -349,35 +357,44 @@ function playRound(playerGesture) {
 
   if (winner === "player") {
     playerScore++;
-    resultText = "你贏了這一回合！AI 被你打敗了 🎉";
+    roundResultTitle = "你贏了！";
+    roundResultEmoji = "🎉";
+    roundResultMessage = `你出 ${gestureToChinese(playerGesture)}，電腦出 ${gestureToChinese(computerGesture)}`;
+    resultText = "你贏了這一回合！";
   } else if (winner === "computer") {
     computerScore++;
-    resultText = "電腦贏了這一回合，再試一次 💪";
+    roundResultTitle = "你輸了！";
+    roundResultEmoji = "💪";
+    roundResultMessage = `你出 ${gestureToChinese(playerGesture)}，電腦出 ${gestureToChinese(computerGesture)}`;
+    resultText = "電腦贏了這一回合！";
   } else {
-    resultText = "平手！你們太有默契了 🤝";
+    roundResultTitle = "平手！";
+    roundResultEmoji = "🤝";
+    roundResultMessage = `你和電腦都出 ${gestureToChinese(playerGesture)}`;
+    resultText = "這一回合平手！";
   }
 
   scoreText = `第 ${round} / ${maxRound} 回合｜你 ${playerScore}：${computerScore} 電腦`;
 
-  roundLocked = true;
-  roundUnlockTime = millis() + ROUND_PAUSE_TIME;
+  gameState = "roundResult";
+  roundResultStartTime = millis();
 }
 
-function updateRoundLock() {
-  if (!roundLocked) return;
+function updateRoundResultModal() {
+  const elapsed = millis() - roundResultStartTime;
 
-  if (millis() < roundUnlockTime) return;
-
-  roundLocked = false;
+  if (elapsed < ROUND_RESULT_TIME) return;
 
   if (round >= maxRound) {
     enterMenuState();
   } else {
     round++;
-    resultText = `第 ${round} 回合開始，請出拳！`;
-    scoreText = `第 ${round} / ${maxRound} 回合｜你 ${playerScore}：${computerScore} 電腦`;
     playerMove = "等待手勢";
     computerMove = "等待中";
+    resultText = `第 ${round} 回合準備開始，請先放開手勢`;
+    scoreText = `第 ${round} / ${maxRound} 回合｜你 ${playerScore}：${computerScore} 電腦`;
+    gameState = "playing";
+    needReleaseHand = true;
   }
 }
 
@@ -407,11 +424,12 @@ function enterMenuState() {
   }
 
   menuStatus = "請選擇：☝️ 只伸食指繼續，🤙 只伸小指結束";
+  resetPlayGestureOnly();
   resetMenuGestureOnly();
 }
 
 // =====================================================
-// 遊戲結束選單手勢
+// 三回合結束選單手勢
 // =====================================================
 
 function handleMenuGesture(landmarks) {
@@ -426,34 +444,36 @@ function handleMenuGesture(landmarks) {
 
   if (menuGesture !== currentMenuGesture) {
     currentMenuGesture = menuGesture;
-    gestureStartTime = now;
-    gestureProgress = 0;
-    gestureTriggered = false;
+    menuGestureStartTime = now;
+    menuGestureProgress = 0;
+    menuGestureTriggered = false;
 
     if (menuGesture === "continue") {
       menuStatus = "偵測到 ☝️ 只伸食指，請保持 2 秒";
-    } else if (menuGesture === "exit") {
+    }
+
+    if (menuGesture === "exit") {
       menuStatus = "偵測到 🤙 只伸小指，請保持 2 秒";
     }
 
     return;
   }
 
-  const elapsed = now - gestureStartTime;
-  gestureProgress = constrain(elapsed / GESTURE_CONFIRM_TIME, 0, 1);
+  const elapsed = now - menuGestureStartTime;
+  menuGestureProgress = constrain(elapsed / MENU_CONFIRM_TIME, 0, 1);
 
-  if (elapsed >= GESTURE_CONFIRM_TIME && !gestureTriggered) {
-    gestureTriggered = true;
+  if (elapsed >= MENU_CONFIRM_TIME && !menuGestureTriggered) {
+    menuGestureTriggered = true;
 
     if (menuGesture === "continue") {
       menuStatus = "確認成功：繼續遊戲！";
-
       setTimeout(function () {
         restartGame();
       }, 500);
-    } else if (menuGesture === "exit") {
-      menuStatus = "確認成功：結束遊戲！";
+    }
 
+    if (menuGesture === "exit") {
+      menuStatus = "確認成功：結束遊戲！";
       setTimeout(function () {
         endGame();
       }, 500);
@@ -463,9 +483,9 @@ function handleMenuGesture(landmarks) {
 
 function resetMenuGestureOnly() {
   currentMenuGesture = "none";
-  gestureStartTime = null;
-  gestureProgress = 0;
-  gestureTriggered = false;
+  menuGestureStartTime = null;
+  menuGestureProgress = 0;
+  menuGestureTriggered = false;
 }
 
 function restartGame() {
@@ -477,8 +497,7 @@ function restartGame() {
   playerScore = 0;
   computerScore = 0;
   round = 1;
-  roundLocked = false;
-  roundUnlockTime = 0;
+  needReleaseHand = true;
   resetPlayGestureOnly();
   resetMenuGestureOnly();
 }
@@ -513,14 +532,12 @@ function drawFullScreenBackground() {
 function drawMainPanel() {
   noStroke();
 
-  // 主玻璃卡片
   fill(15, 23, 42, 245);
   rect(0, 0, DESIGN_W, DESIGN_H, 34);
 
   fill(30, 41, 59, 220);
   rect(26, 26, DESIGN_W - 52, DESIGN_H - 52, 30);
 
-  // 裝飾光暈
   fill(56, 189, 248, 36);
   circle(DESIGN_W - 120, 110, 230);
 
@@ -530,7 +547,6 @@ function drawMainPanel() {
   fill(34, 197, 94, 16);
   circle(DESIGN_W * 0.5, DESIGN_H + 20, 300);
 
-  // 標題
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(42);
@@ -540,7 +556,7 @@ function drawMainPanel() {
   textStyle(NORMAL);
   textSize(18);
   fill(203, 213, 225);
-  text("等比全螢幕互動版｜回合鎖定防誤判｜選單手勢獨立設計", DESIGN_W / 2, 96);
+  text("每回合結果視窗｜防連續誤判｜選單手勢獨立設計", DESIGN_W / 2, 96);
 }
 
 function drawCameraView() {
@@ -734,11 +750,15 @@ function drawGestureGuide() {
     text("遊戲中請出拳：✊ 石頭　✌️ 剪刀　✋ 布", x + 30, y + 62);
 
     let progressText = "";
-    if (currentPlayGesture !== "none" && !roundLocked) {
+    if (needReleaseHand) {
+      progressText = "｜請先放開手勢";
+    } else if (currentPlayGesture !== "none") {
       progressText = `｜確認中 ${Math.floor(playGestureProgress * 100)}%`;
     }
 
     text(`目前 AI 偵測：${gestureToChinese(detectedGesture)} ${progressText}`, x + 30, y + 92);
+  } else if (gameState === "roundResult") {
+    text("回合結果顯示中，暫停偵測，避免連續誤判。", x + 30, y + 72);
   } else if (gameState === "menu") {
     text("遊戲結束選單：☝️ 只伸食指保持 2 秒＝繼續　｜　🤙 只伸小指保持 2 秒＝結束", x + 30, y + 62);
     text(`目前選單狀態：${menuStatus}`, x + 30, y + 92);
@@ -747,42 +767,52 @@ function drawGestureGuide() {
   }
 }
 
-function drawRoundPauseOverlay() {
-  const remain = max(0, roundUnlockTime - millis());
-  const progress = 1 - remain / ROUND_PAUSE_TIME;
-  const nextText = round >= maxRound ? "即將進入結束選單" : `即將進入第 ${round + 1} 回合`;
+function drawRoundResultModal() {
+  const elapsed = millis() - roundResultStartTime;
+  const remain = max(0, ROUND_RESULT_TIME - elapsed);
+  const progress = constrain(elapsed / ROUND_RESULT_TIME, 0, 1);
+  const countdown = ceil(remain / 1000);
 
-  const x = 365;
-  const y = 235;
-  const w = 550;
-  const h = 210;
+  const x = 335;
+  const y = 190;
+  const w = 610;
+  const h = 340;
 
   noStroke();
-  fill(0, 0, 0, 150);
+  fill(0, 0, 0, 175);
   rect(0, 0, DESIGN_W, DESIGN_H, 34);
 
   fill(248, 250, 252);
-  rect(x, y, w, h, 32);
+  rect(x, y, w, h, 36);
+
+  textAlign(CENTER, CENTER);
+
+  textSize(70);
+  text(roundResultEmoji, x + w / 2, y + 70);
 
   fill(15, 23, 42);
-  textAlign(CENTER, CENTER);
-  textSize(32);
+  textSize(42);
   textStyle(BOLD);
-  text(`第 ${round} 回合結果`, x + w / 2, y + 48);
+  text(roundResultTitle, x + w / 2, y + 135);
 
-  textSize(22);
   textStyle(NORMAL);
+  textSize(22);
   fill(51, 65, 85);
-  text(resultText, x + w / 2, y + 92);
+  text(roundResultMessage, x + w / 2, y + 185);
 
   fill(100, 116, 139);
   textSize(20);
-  text(nextText, x + w / 2, y + 130);
 
-  const barX = x + 70;
-  const barY = y + 158;
-  const barW = w - 140;
-  const barH = 22;
+  if (round >= maxRound) {
+    text(`即將進入結束選單：${countdown}`, x + w / 2, y + 230);
+  } else {
+    text(`即將進入第 ${round + 1} 回合：${countdown}`, x + w / 2, y + 230);
+  }
+
+  const barX = x + 90;
+  const barY = y + 270;
+  const barW = w - 180;
+  const barH = 24;
 
   fill(226, 232, 240);
   rect(barX, barY, barW, barH, 999);
@@ -791,7 +821,7 @@ function drawRoundPauseOverlay() {
   rect(barX, barY, barW * progress, barH, 999);
 
   fill(15, 23, 42);
-  textSize(13);
+  textSize(14);
   textStyle(BOLD);
   text(`${Math.floor(progress * 100)}%`, barX + barW / 2, barY + barH / 2);
 }
@@ -843,13 +873,13 @@ function drawProgressBar(x, y, w, h) {
     fill(148, 163, 184);
   }
 
-  rect(x, y, w * gestureProgress, h, 999);
+  rect(x, y, w * menuGestureProgress, h, 999);
 
   fill(15, 23, 42);
   textAlign(CENTER, CENTER);
   textSize(14);
   textStyle(BOLD);
-  text(`${Math.floor(gestureProgress * 100)}%`, x + w / 2, y + h / 2);
+  text(`${Math.floor(menuGestureProgress * 100)}%`, x + w / 2, y + h / 2);
 }
 
 function drawEndedPanel() {
@@ -882,8 +912,9 @@ function drawEndedPanel() {
 }
 
 function getGameStateText() {
-  if (roundLocked && gameState === "playing") return "回合結果確認中";
+  if (gameState === "playing" && needReleaseHand) return "等待放開手勢";
   if (gameState === "playing") return "遊戲進行中";
+  if (gameState === "roundResult") return "回合結果顯示中";
   if (gameState === "menu") return "等待選單手勢";
   if (gameState === "ended") return "遊戲已結束";
   return "未知";
