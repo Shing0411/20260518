@@ -919,3 +919,42 @@ function getGameStateText() {
   if (gameState === "ended") return "遊戲已結束";
   return "未知";
 }
+function drawCreatorBadge() {
+  const badgeX = DESIGN_W - 360;
+  const badgeY = 42;
+  const badgeW = 285;
+  const badgeH = 54;
+
+  push();
+
+  // 外層光暈
+  noStroke();
+  fill(56, 189, 248, 35);
+  rect(badgeX - 6, badgeY - 6, badgeW + 12, badgeH + 12, 22);
+
+  // 主體膠囊
+  fill(2, 6, 23, 210);
+  rect(badgeX, badgeY, badgeW, badgeH, 18);
+
+  // 左側小亮點
+  fill(34, 211, 238);
+  circle(badgeX + 26, badgeY + badgeH / 2, 12);
+
+  fill(250, 204, 21);
+  circle(badgeX + 26, badgeY + badgeH / 2, 5);
+
+  // 文字
+  textAlign(LEFT, CENTER);
+
+  textStyle(BOLD);
+  textSize(15);
+  fill(255);
+  text("CREATOR", badgeX + 46, badgeY + 18);
+
+  textStyle(NORMAL);
+  textSize(16);
+  fill(203, 213, 225);
+  text("414736529  王家興創作", badgeX + 46, badgeY + 38);
+
+  pop();
+}
