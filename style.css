@@ -16,7 +16,6 @@ body {
   font-family: "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
 }
 
-/* 全螢幕置中容器 */
 #app {
   width: 100vw;
   height: 100vh;
@@ -25,7 +24,6 @@ body {
   align-items: center;
 }
 
-/* p5.js canvas */
 canvas {
   display: block;
   border-radius: 28px;
@@ -34,12 +32,7 @@ canvas {
     0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
-/*
-  重要：
-  手機瀏覽器上 video 不建議 display:none。
-  這裡用移到畫面外 + 透明方式隱藏，
-  讓相機仍然可以正常提供畫面給 p5.js。
-*/
+/* 不要用 display:none，手機可能會讀不到相機 */
 #inputVideo {
   position: fixed;
   left: -9999px;
