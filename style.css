@@ -10,12 +10,13 @@ body {
   min-height: 100%;
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(56, 189, 248, 0.22), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.22), transparent 35%),
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.24), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.24), transparent 36%),
     linear-gradient(135deg, #020617 0%, #0f172a 45%, #111827 100%);
-  font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+  font-family: "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
 }
 
+/* 全螢幕置中容器 */
 #app {
   width: 100vw;
   height: 100vh;
@@ -24,14 +25,21 @@ body {
   align-items: center;
 }
 
+/* p5.js canvas */
 canvas {
   display: block;
   border-radius: 28px;
   box-shadow:
-    0 30px 80px rgba(0, 0, 0, 0.45),
+    0 30px 80px rgba(0, 0, 0, 0.48),
     0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
+/*
+  重要：
+  手機瀏覽器上 video 不建議 display:none。
+  這裡用移到畫面外 + 透明方式隱藏，
+  讓相機仍然可以正常提供畫面給 p5.js。
+*/
 #inputVideo {
   position: fixed;
   left: -9999px;

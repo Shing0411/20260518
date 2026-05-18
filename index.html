@@ -2,22 +2,31 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <title>AI 手勢魔法猜拳遊戲</title>
 
-    <link rel="stylesheet" type="text/css" href="style.css">
+    <!-- 網站樣式 -->
+    <link rel="stylesheet" type="text/css" href="style.css" />
 
+    <!-- p5.js 本機檔案 -->
     <script src="libraries/p5.min.js"></script>
     <script src="libraries/p5.sound.min.js"></script>
 
-    <!-- MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- MediaPipe Hands 手勢辨識套件 -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
+      crossorigin="anonymous">
+    </script>
   </head>
 
   <body>
     <main id="app">
+      <!--
+        這個 video 只負責接收相機畫面，
+        實際畫面會由 p5.js 畫到 canvas 上。
+        注意：手機端不要使用 display:none，否則有些手機會讀不到相機畫面。
+      -->
       <video
         id="inputVideo"
         autoplay
@@ -26,6 +35,7 @@
       </video>
     </main>
 
+    <!-- p5.js 主程式 -->
     <script src="sketch.js"></script>
   </body>
 </html>

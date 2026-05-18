@@ -1,13 +1,12 @@
 let videoElement;
 let hands;
-let camera;
 
 let handLandmarks = null;
 let detectedGesture = "none";
 
-// 相機狀態
 let cameraStatus = "正在啟動攝影機...";
 let cameraReady = false;
+let cameraError = "";
 
 // 遊戲狀態
 let gameState = "playing";
@@ -38,6 +37,9 @@ let gestureProgress = 0;
 let menuStatus = "請做出手勢選擇";
 let gestureTriggered = false;
 
+// 防止 MediaPipe 重複送出影像
+let isSendingFrame = false;
+
 function setup() {
   const canvasW = min(windowWidth * 0.94, 980);
   const canvasH = min(windowHeight * 0.9, 680);
@@ -53,6 +55,7 @@ function setup() {
   }
 
   setupMediaPipeHands();
+  startMobileCamera();
 }
 
 function draw() {
@@ -75,13 +78,12 @@ function draw() {
 function windowResized() {
   const canvasW = min(windowWidth * 0.94, 980);
   const canvasH = min(windowHeight * 0.9, 680);
-
   resizeCanvas(canvasW, canvasH);
 }
 
-// ===============================
+// =====================================================
 // MediaPipe Hands 設定
-// ===============================
+// =====================================================
 
 function setupMediaPipeHands() {
   hands = new Hands({
@@ -93,35 +95,98 @@ function setupMediaPipeHands() {
   hands.setOptions({
     maxNumHands: 1,
     modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.65
   });
 
   hands.onResults(onHandsResults);
+}
 
-  camera = new Camera(videoElement, {
-    onFrame: async function() {
-      if (videoElement.readyState >= 2) {
-        await hands.send({ image: videoElement });
+// =====================================================
+// 手機相機啟動：不用 MediaPipe Camera，改用 getUserMedia
+// =====================================================
+
+async function startMobileCamera() {
+  try {
+    cameraStatus = "正在請求相機權限...";
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      cameraStatus = "此瀏覽器不支援相機功能";
+      cameraError = "請使用 Chrome 或 Safari 開啟。";
+      alert("此瀏覽器不支援 getUserMedia 相機功能，請使用 Chrome 或 Safari。");
+      return;
+    }
+
+    // 手機若不是 HTTPS，通常會擋相機
+    if (!window.isSecureContext && location.hostname !== "localhost") {
+      cameraStatus = "目前不是 HTTPS，手機可能無法啟動相機";
+      cameraError = "請上傳到 p5.js Web Editor、GitHub Pages、Netlify 或 Vercel 測試。";
+      alert("手機瀏覽器通常需要 HTTPS 才能開啟相機。請用 p5.js Web Editor、GitHub Pages、Netlify 或 Vercel 測試。");
+      return;
+    }
+
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
       }
-    },
-    width: 640,
-    height: 480,
-    facingMode: "user"
-  });
+    };
 
-  camera.start()
-    .then(function() {
-      cameraReady = true;
-      cameraStatus = "攝影機啟動成功";
-      console.log("攝影機啟動成功");
-    })
-    .catch(function(error) {
-      cameraReady = false;
-      cameraStatus = "攝影機啟動失敗，請檢查權限或 HTTPS";
-      console.error("攝影機啟動失敗：", error);
-      alert("攝影機啟動失敗：請確認是否允許相機權限，並使用 HTTPS 或 Live Server 開啟。");
-    });
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+    videoElement.srcObject = stream;
+    videoElement.setAttribute("playsinline", true);
+    videoElement.setAttribute("autoplay", true);
+    videoElement.setAttribute("muted", true);
+    videoElement.muted = true;
+
+    await videoElement.play();
+
+    cameraReady = true;
+    cameraStatus = "攝影機啟動成功";
+    cameraError = "";
+
+    requestAnimationFrame(sendFrameToMediaPipe);
+
+  } catch (error) {
+    console.error("攝影機啟動失敗：", error);
+
+    cameraReady = false;
+    cameraStatus = "攝影機啟動失敗";
+    cameraError = error.message || "請確認相機權限與 HTTPS 環境";
+
+    alert(
+      "攝影機啟動失敗。\n\n" +
+      "請確認：\n" +
+      "1. 已允許相機權限\n" +
+      "2. 手機使用 HTTPS 網址\n" +
+      "3. 不要用 LINE 內建瀏覽器開啟\n" +
+      "4. 建議使用 Chrome 或 Safari"
+    );
+  }
+}
+
+async function sendFrameToMediaPipe() {
+  if (
+    cameraReady &&
+    hands &&
+    videoElement &&
+    videoElement.readyState >= 2 &&
+    !isSendingFrame
+  ) {
+    try {
+      isSendingFrame = true;
+      await hands.send({ image: videoElement });
+    } catch (error) {
+      console.error("MediaPipe 影像送出失敗：", error);
+    } finally {
+      isSendingFrame = false;
+    }
+  }
+
+  requestAnimationFrame(sendFrameToMediaPipe);
 }
 
 function onHandsResults(results) {
@@ -144,9 +209,9 @@ function onHandsResults(results) {
   }
 }
 
-// ===============================
+// =====================================================
 // 手勢辨識核心
-// ===============================
+// =====================================================
 
 function isFingerExtended(landmarks, tip, pip) {
   return landmarks[tip].y < landmarks[pip].y;
@@ -195,9 +260,9 @@ function gestureToChinese(gesture) {
   return "尚未偵測";
 }
 
-// ===============================
+// =====================================================
 // 遊戲邏輯
-// ===============================
+// =====================================================
 
 function handlePlayingGesture(gesture) {
   if (gesture !== "rock" && gesture !== "scissors" && gesture !== "paper") {
@@ -278,9 +343,9 @@ function enterMenuState() {
   resetMenuGestureOnly();
 }
 
-// ===============================
+// =====================================================
 // 遊戲結束選單手勢
-// ===============================
+// =====================================================
 
 function handleMenuGesture(landmarks) {
   const gesture = detectGesture(landmarks);
@@ -366,22 +431,19 @@ function endGame() {
   resetMenuGestureOnly();
 }
 
-// ===============================
-// 畫面繪製：專業網站版
-// ===============================
+// =====================================================
+// 畫面繪製
+// =====================================================
 
 function drawMainPanel() {
   noStroke();
 
-  // 主卡片
   fill(15, 23, 42, 245);
   rect(0, 0, width, height, 28);
 
-  // 內層玻璃感
   fill(30, 41, 59, 220);
   rect(22, 22, width - 44, height - 44, 26);
 
-  // 裝飾光暈
   fill(56, 189, 248, 32);
   circle(width - 90, 90, 180);
 
@@ -391,7 +453,6 @@ function drawMainPanel() {
   fill(34, 197, 94, 18);
   circle(width * 0.5, height + 20, 260);
 
-  // 標題
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(min(width * 0.04, 34));
@@ -405,23 +466,28 @@ function drawMainPanel() {
 }
 
 function drawCameraView() {
-  const panelPadding = 36;
+  const layout = getLayout();
 
-  const camX = panelPadding;
-  const camY = 125;
-  const camW = width * 0.48;
-  const camH = height * 0.48;
+  const camX = layout.camX;
+  const camY = layout.camY;
+  const camW = layout.camW;
+  const camH = layout.camH;
 
-  // 相機卡片陰影
   noStroke();
   fill(2, 6, 23, 150);
   rect(camX - 8, camY - 8, camW + 16, camH + 46, 28);
 
+  // 相機畫面
   push();
   translate(camX + camW, camY);
   scale(-1, 1);
 
-  if (videoElement && videoElement.readyState >= 2) {
+  if (
+    cameraReady &&
+    videoElement &&
+    videoElement.readyState >= 2 &&
+    videoElement.videoWidth > 0
+  ) {
     image(videoElement, 0, 0, camW, camH);
   } else {
     fill(15, 23, 42);
@@ -432,27 +498,32 @@ function drawCameraView() {
     fill(255);
     textAlign(CENTER, CENTER);
     textSize(15);
-    text(cameraStatus, -camW / 2, camH / 2);
+    text(cameraStatus, -camW / 2, camH / 2 - 10);
+
+    if (cameraError) {
+      fill(250, 204, 21);
+      textSize(13);
+      text(cameraError, -camW / 2, camH / 2 + 18);
+    }
     pop();
   }
 
   pop();
 
   noFill();
-  stroke(125, 211, 252, 190);
+  stroke(cameraReady ? color(34, 211, 238, 210) : color(250, 204, 21, 210));
   strokeWeight(3);
   rect(camX, camY, camW, camH, 24);
 
-  // 上方標籤
   noStroke();
-  fill(14, 165, 233);
+  fill(cameraReady ? color(14, 165, 233) : color(234, 179, 8));
   rect(camX + 18, camY + 16, 112, 30, 999);
 
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(13);
   textStyle(BOLD);
-  text("LIVE CAMERA", camX + 74, camY + 31);
+  text(cameraReady ? "LIVE CAMERA" : "CAMERA", camX + 74, camY + 31);
 
   drawHandPoints(camX, camY, camW, camH);
 
@@ -464,12 +535,47 @@ function drawCameraView() {
   text(cameraStatus, camX + 12, camY + camH + 24);
 }
 
+function getLayout() {
+  const isSmall = width < 760;
+
+  if (!isSmall) {
+    return {
+      camX: 36,
+      camY: 125,
+      camW: width * 0.48,
+      camH: height * 0.48,
+      infoX: width * 0.55,
+      infoY: 125,
+      infoW: width * 0.38,
+      infoH: height * 0.48,
+      guideX: 36,
+      guideY: height - 145,
+      guideW: width - 72,
+      guideH: 105
+    };
+  }
+
+  return {
+    camX: 30,
+    camY: 110,
+    camW: width - 60,
+    camH: height * 0.34,
+    infoX: 30,
+    infoY: 110 + height * 0.34 + 58,
+    infoW: width - 60,
+    infoH: height * 0.24,
+    guideX: 30,
+    guideY: height - 128,
+    guideW: width - 60,
+    guideH: 96
+  };
+}
+
 function drawHandPoints(camX, camY, camW, camH) {
   if (!handLandmarks) return;
 
   push();
 
-  // 先畫簡單骨架線
   const connections = [
     [0, 1], [1, 2], [2, 3], [3, 4],
     [0, 5], [5, 6], [6, 7], [7, 8],
@@ -494,7 +600,6 @@ function drawHandPoints(camX, camY, camW, camH) {
     line(ax, ay, bx, by);
   }
 
-  // 再畫關鍵點
   for (let i = 0; i < handLandmarks.length; i++) {
     const lm = handLandmarks[i];
 
@@ -516,10 +621,12 @@ function drawHandPoints(camX, camY, camW, camH) {
 }
 
 function drawGameInfo() {
-  const infoX = width * 0.55;
-  const infoY = 125;
-  const infoW = width * 0.38;
-  const infoH = height * 0.48;
+  const layout = getLayout();
+
+  const infoX = layout.infoX;
+  const infoY = layout.infoY;
+  const infoW = layout.infoW;
+  const infoH = layout.infoH;
 
   noStroke();
   fill(2, 6, 23, 165);
@@ -528,7 +635,6 @@ function drawGameInfo() {
   fill(15, 23, 42, 220);
   rect(infoX, infoY, infoW, infoH, 24);
 
-  // 小標籤
   fill(99, 102, 241);
   rect(infoX + 22, infoY + 18, 92, 30, 999);
 
@@ -540,40 +646,41 @@ function drawGameInfo() {
 
   fill(255);
   textAlign(LEFT, TOP);
-  textSize(22);
+  textSize(width < 760 ? 18 : 22);
   textStyle(BOLD);
   text("遊戲資訊", infoX + 24, infoY + 62);
 
   textStyle(NORMAL);
-  textSize(16);
+  textSize(width < 760 ? 13 : 16);
   fill(226, 232, 240);
 
-  text(`目前狀態：${getGameStateText()}`, infoX + 24, infoY + 105);
-  text(`你出：${playerMove}`, infoX + 24, infoY + 143);
-  text(`電腦：${computerMove}`, infoX + 24, infoY + 181);
+  text(`目前狀態：${getGameStateText()}`, infoX + 24, infoY + 100);
+  text(`你出：${playerMove}`, infoX + 24, infoY + 130);
+  text(`電腦：${computerMove}`, infoX + 24, infoY + 160);
 
   fill(250, 204, 21);
-  textSize(17);
-  text(resultText, infoX + 24, infoY + 228, infoW - 48, 90);
+  textSize(width < 760 ? 13 : 17);
+  text(resultText, infoX + 24, infoY + 195, infoW - 48, 70);
 
-  // 分數膠囊
-  const scoreY = infoY + infoH - 55;
+  const scoreY = infoY + infoH - 45;
 
   fill(8, 47, 73, 220);
-  rect(infoX + 22, scoreY, infoW - 44, 34, 999);
+  rect(infoX + 22, scoreY, infoW - 44, 32, 999);
 
   fill(125, 211, 252);
   textAlign(CENTER, CENTER);
-  textSize(15);
+  textSize(width < 760 ? 12 : 15);
   textStyle(BOLD);
-  text(scoreText, infoX + infoW / 2, scoreY + 17);
+  text(scoreText, infoX + infoW / 2, scoreY + 16);
 }
 
 function drawGestureGuide() {
-  const x = 36;
-  const y = height - 145;
-  const w = width - 72;
-  const h = 105;
+  const layout = getLayout();
+
+  const x = layout.guideX;
+  const y = layout.guideY;
+  const w = layout.guideW;
+  const h = layout.guideH;
 
   noStroke();
   fill(2, 6, 23, 145);
@@ -584,22 +691,22 @@ function drawGestureGuide() {
 
   fill(255);
   textAlign(LEFT, TOP);
-  textSize(18);
+  textSize(width < 760 ? 15 : 18);
   textStyle(BOLD);
-  text("手勢操作說明", x + 26, y + 18);
+  text("手勢操作說明", x + 24, y + 16);
 
   textStyle(NORMAL);
-  textSize(15);
+  textSize(width < 760 ? 12 : 15);
   fill(226, 232, 240);
 
   if (gameState === "playing") {
-    text("遊戲中請出拳：✊ 石頭　✌️ 剪刀　✋ 布", x + 26, y + 52);
-    text(`目前 AI 偵測：${gestureToChinese(detectedGesture)}`, x + 26, y + 78);
+    text("遊戲中請出拳：✊ 石頭　✌️ 剪刀　✋ 布", x + 24, y + 48);
+    text(`目前 AI 偵測：${gestureToChinese(detectedGesture)}`, x + 24, y + 73);
   } else if (gameState === "menu") {
-    text("遊戲結束選單：✋ 張開手掌保持 2 秒＝繼續　✊ 握拳保持 2 秒＝結束", x + 26, y + 52);
-    text(`目前選單狀態：${menuStatus}`, x + 26, y + 78);
+    text("結束選單：✋ 張開手掌 2 秒＝繼續　✊ 握拳 2 秒＝結束", x + 24, y + 48);
+    text(`目前選單狀態：${menuStatus}`, x + 24, y + 73);
   } else {
-    text("遊戲已結束，重新整理網頁可以再次開始。", x + 26, y + 60);
+    text("遊戲已結束，重新整理網頁可以再次開始。", x + 24, y + 56);
   }
 }
 
